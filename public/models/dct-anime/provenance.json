@@ -1,0 +1,11 @@
+{
+  "model": "DCT-Net anime head",
+  "source": "https://modelscope.cn/models/damo/cv_unet_person-image-cartoon_compound-models/summary",
+  "sourceFile": "cartoon_h.pb",
+  "sourceRevision": "f3a6f6be8dd6d78e60090d0be8337595af09a893",
+  "sourceSha256": "338e7bf7ab4014ba9da864c2dda104f26d8af6c7f468038782d92ccc8e2dedda",
+  "license": "Apache-2.0",
+  "adaptations": "Frozen GraphDef constants extracted to TensorFlow.js weight manifest; graph operators and weights preserved.",
+  "input": "float32 HWC BGR pixels [0,255]",
+  "output": "int32 HWC BGR pixels [0,255]"
+}

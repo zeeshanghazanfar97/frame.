@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Aperture, Camera, Check, ChevronLeft, ChevronRight, CircleHelp, Download, FlipHorizontal2, Maximize2, Mic, MicOff, ScanLine, Shuffle, Sparkles, Square, Video, X } from 'lucide-react';
 import { CameraEngine, initialStatus, type CameraChoice } from './media/engine';
 import { CaptureManager, downloadBlob, idleCapture, type SavedClip } from './media/capture';
-import { effects, getEffect, type EffectCategory } from './media/effects';
+import { availableEffects, effects, getEffect, type EffectCategory } from './media/effects';
 
 function PoseDiagram() {
   // A functional landmark diagram: index tips above, thumb tips facing inward.
@@ -50,7 +50,8 @@ export default function App() {
   const loading = status.state === 'loading';
   const recordingBusy = captureState.phase !== 'idle';
   const current = getEffect(selected);
-  const setEffect = useCallback((id: string) => { setSelected(id); engine.current?.setEffect(id); cycleElapsed.current = 0; }, []);
+  const usableEffects=availableEffects(status.renderer);
+  const setEffect = useCallback((id: string) => {if(getEffect(id).model)setCycling(false);setSelected(id); engine.current?.setEffect(id); cycleElapsed.current = 0; }, []);
 
   useEffect(() => {
     const runtime = new CameraEngine(host.current!, setStatus);
@@ -59,6 +60,7 @@ export default function App() {
       clipRef.current = saved; setClip(saved);
     }, setNotice, frozen => runtime.freezeDimensions(frozen));
     runtime.onInterrupt = () => { void recorder.stop(); };
+    runtime.onEffectFallback=(id,message)=>{setSelected(id);setNotice(message);};
     engine.current = runtime; capture.current = recorder;
     const visibility = async () => {
       if (document.hidden) { await recorder.stop(); runtime.stop(true); }
@@ -75,6 +77,7 @@ export default function App() {
   }, []);
 
   useEffect(() => { engine.current?.setStrength(strength / 100); }, [strength]);
+  useEffect(()=>{if(status.renderer==='canvas'&&!getEffect(selected).canvas)setEffect('pixelate');},[status.renderer,selected,setEffect]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(''), 7000);
@@ -106,16 +109,17 @@ export default function App() {
     return () => { surfaces.forEach(element => { element.inert = false; }); document.body.style.overflow = overflow; document.removeEventListener('keydown', keydown); previous?.focus(); };
   }, [help, clip]);
   useEffect(() => {
-    if (!cycling || !running || status.phase !== 'active') return;
+    if (!cycling || !running || (status.mode!=='full'&&status.phase!=='active')) return;
     const timer = setInterval(() => {
       cycleElapsed.current += 250;
       if (cycleElapsed.current >= 5000) {
-        const next = (effects.findIndex(effect => effect.id === selected) + 1) % effects.length;
-        setEffect(effects[next].id);
+        const library=availableEffects(status.renderer).filter(effect=>!effect.model);
+        const next=(library.findIndex(effect=>effect.id===selected)+1)%library.length;
+        setEffect(library[next].id);
       }
     }, 250);
     return () => clearInterval(timer);
-  }, [cycling, running, status.phase, selected, setEffect]);
+  }, [cycling,running,status.phase,status.mode,status.renderer,selected,setEffect]);
 
   const refreshDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -159,8 +163,8 @@ export default function App() {
     if (canvas) { if (!CaptureManager.supported()) setNotice('This browser supports photos, but not video recording.'); else void capture.current?.start(canvas, audio); }
   };
   const adjacentEffect = (direction: number) => {
-    const index = effects.findIndex(effect => effect.id === selected);
-    setEffect(effects[(index + direction + effects.length) % effects.length].id);
+    const index=usableEffects.findIndex(effect=>effect.id===selected);
+    setEffect(usableEffects[(index+direction+usableEffects.length)%usableEffects.length].id);
   };
   const keyHandler = (event: React.KeyboardEvent) => {
     if (event.target !== event.currentTarget || !running) return;
@@ -187,12 +191,13 @@ export default function App() {
     <main className="workspace">
       <section className="camera-section" aria-label="Camera playground">
         <div className="section-top"><div className="eyebrow"><span className="tiny-square"/> THE VIEWFINDER</div><span className="local-label">Made on your device <Aperture size={15}/></span></div>
+        <div className="apply-controls"><div className="mode-toggle" role="group" aria-label="Apply filter"><button aria-pressed={status.mode==='window'} disabled={loading} onClick={()=>void engine.current?.setMode('window')}>Hand window</button><button aria-pressed={status.mode==='full'} disabled={loading} onClick={()=>void engine.current?.setMode('full')}>Full video</button></div>{running&&<span className="render-info" title={`Frame command submission: ${status.renderMs} ms`}>{status.renderer==='webgl'?'GPU accelerated':'Compatibility mode'} · {status.fps||'—'} fps</span>}</div>
         <div className={`camera-stage ${running ? 'is-running' : ''}`} ref={stage} tabIndex={0} onKeyDown={keyHandler} aria-label="Camera view. When active, use arrow keys to switch effects or space to take a photo.">
           <div className="camera-host" ref={host}/>
           {!running && <div className="camera-empty">
             <div className="empty-frame"><span/><span/><span/><span/><ScanLine size={48} strokeWidth={1}/></div>
             <h1>{loading ? 'Getting things ready' : status.state === 'error' ? 'Let’s try that again' : status.state === 'paused' ? 'Welcome back' : 'A window to something new.'}</h1>
-            <p>{loading ? 'Your camera and hand tracking will be ready in a moment.' : status.state === 'error' ? status.message : status.state === 'paused' ? 'Your camera paused while you were away. Open it to keep creating.' : 'Make a frame with your fingers. See the world a little differently.'}</p>
+            <p>{loading ? (status.mode==='full'?'Your camera will be ready in a moment.':'Your camera and hand tracking will be ready in a moment.') : status.state === 'error' ? status.message : status.state === 'paused' ? 'Your camera paused while you were away. Open it to keep creating.' : status.mode==='full'?'Choose an effect and apply it to the whole video. No hand pose needed.':'Make a frame with your fingers. See the world a little differently.'}</p>
             <button className="primary-button" onClick={() => void openCamera()} disabled={loading || transitioning}>
               {loading ? <span className="spinner"/> : <Camera size={19}/>} {loading ? 'Opening camera…' : status.state === 'error' ? 'Try again' : status.state === 'paused' ? 'Resume camera' : 'Open your camera'}
             </button>
@@ -200,7 +205,7 @@ export default function App() {
             {loading && <button className="cancel-link" onClick={() => engine.current?.stop()}>Cancel</button>}
           </div>}
           {running && <>
-            <div className="stage-top"><div className={`tracking-pill ${status.phase === 'active' ? 'tracking-active' : ''}`} role="status"><span/>{status.message}</div><button className="stage-icon" aria-label="Fullscreen camera" onClick={() => void fullscreen()}><Maximize2 size={18}/></button></div>
+            <div className="stage-top"><div className={`tracking-pill ${status.phase === 'active'||status.mode==='full' ? 'tracking-active' : ''}`} role="status"><span/>{status.message}</div><button className="stage-icon" aria-label="Fullscreen camera" onClick={() => void fullscreen()}><Maximize2 size={18}/></button></div>
             <div className="stage-bottom"><span className="effect-tag"><Sparkles size={15}/>{current.label}</span><span className="camera-live">LIVE</span></div>
           </>}
           {captureState.phase === 'countdown' && <div className="countdown-overlay" role="status"><span key={captureState.countdown}>{captureState.countdown}</span><p>Hold your frame</p></div>}
@@ -217,18 +222,20 @@ export default function App() {
         </div>
 
         {running && devices.length > 1 && <div className="device-row"><label htmlFor="camera-device">Camera</label><select id="camera-device" value={device} disabled={loading || transitioning} onChange={event => void changeCamera({ deviceId: event.target.value, facingMode: facing })}>{devices.map((camera, index) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `Camera ${index + 1}`}</option>)}</select></div>}
-        <div className="pose-guide"><div className="guide-number">01</div><div><h2>Two hands. One little window.</h2><p>Point both index fingers up and your thumbs inward. Fold your other fingers, then move your hands to shape the effect.</p></div><div className="inline-pose"><PoseDiagram/></div></div>
+        <div className="pose-guide"><div className="guide-number">01</div><div><h2>{status.mode==='full'?'The whole view, transformed.':'Two hands. One little window.'}</h2><p>{status.mode==='full'?'Filters cover the entire video. Switch effects any time, or explore hands-free with auto-cycle.':'Point both index fingers up and your thumbs inward. Fold your other fingers, then move your hands to shape the effect.'}</p></div>{status.mode==='window'&&<div className="inline-pose"><PoseDiagram/></div>}</div>
       </section>
 
       <aside className="library" aria-label="Effect library">
-        <div className="library-heading"><div><div className="eyebrow">THE EFFECT LIBRARY</div><h2>Pick your perspective<span>.</span></h2></div><span className="effect-count">12</span></div>
-        <div className="category-tabs" role="group" aria-label="Filter effects by category">{(['All', 'Color', 'Texture', 'Play'] as const).map(item => <button key={item} className={category === item ? 'selected' : ''} aria-pressed={category === item} onClick={() => setCategory(item)}>{item}</button>)}</div>
-        <div className="effect-grid">{effects.filter(effect => category === 'All' || effect.category === category).map(effect => <button key={effect.id} className={`effect-card ${selected === effect.id ? 'selected' : ''}`} onClick={() => setEffect(effect.id)} aria-pressed={selected === effect.id} aria-label={`Select ${effect.label} effect`} title={effect.description}>
+        <div className="library-heading"><div><div className="eyebrow">THE EFFECT LIBRARY</div><h2>Pick your perspective<span>.</span></h2></div><span className="effect-count">{effects.length}</span></div>
+        <div className="category-tabs" role="group" aria-label="Filter effects by category">{(['All','Color','Texture','Play','Style'] as const).map(item => <button key={item} className={category === item ? 'selected' : ''} aria-pressed={category === item} onClick={() => setCategory(item)}>{item}</button>)}</div>
+        <div className="effect-grid">{effects.filter(effect => category === 'All' || effect.category === category).map(effect => <button key={effect.id} disabled={status.renderer==='canvas'&&!effect.canvas} className={`effect-card ${selected === effect.id ? 'selected' : ''}`} onClick={() => setEffect(effect.id)} aria-pressed={selected === effect.id} aria-label={`Select ${effect.label} effect`} title={status.renderer==='canvas'&&!effect.canvas?'This effect requires GPU acceleration.':effect.description}>
           <EffectThumb name={effect.thumbnail}/><span className="effect-name">{effect.label}{selected === effect.id && <span className="selected-check"><Check size={12} strokeWidth={3}/></span>}</span>
         </button>)}</div>
         <div className="strength-control"><div><label htmlFor="strength">Effect strength</label><output htmlFor="strength">{strength}%</output></div><input id="strength" type="range" min="0" max="100" value={strength} onChange={event => setStrength(Number(event.target.value))}/></div>
-        <button className={`auto-cycle ${cycling ? 'enabled' : ''}`} onClick={() => { setCycling(value => !value); cycleElapsed.current = 0; }} aria-pressed={cycling}><div className="cycle-icon"><Shuffle size={19}/></div><div><strong>Explore hands-free</strong><span>{cycling ? 'A new effect every 5 seconds' : 'Auto-cycle through the library'}</span></div><span className="switch"><span/></span></button>
-        <div className="library-bottom"><span>{String(effects.findIndex(effect => effect.id === selected) + 1).padStart(2, '0')} / 12</span><div><button className="small-icon" onClick={() => adjacentEffect(-1)} aria-label="Previous effect"><ChevronLeft size={18}/></button><button className="small-icon" onClick={() => adjacentEffect(1)} aria-label="Next effect"><ChevronRight size={18}/></button></div></div>
+        {current.model&&<p className="compatibility-note" role="status">{status.effectFps?`AI anime · ${status.effectFps} processed frames/sec`:'AI anime loads on first use.'} Image quality and frame rate adapt to your device.</p>}
+        <button className={`auto-cycle ${cycling ? 'enabled' : ''}`} onClick={() => { setCycling(value => !value); cycleElapsed.current = 0; }} aria-pressed={cycling}><div className="cycle-icon"><Shuffle size={19}/></div><div><strong>Explore hands-free</strong><span>{cycling ? 'A fast effect every 5 seconds' : 'Auto-cycle through fast effects'}</span></div><span className="switch"><span/></span></button>
+        {status.renderer==='canvas'&&<p className="compatibility-note">{usableEffects.length} effects available in compatibility mode. Other effects need GPU acceleration.</p>}
+        <div className="library-bottom"><span>{String(effects.findIndex(effect => effect.id === selected) + 1).padStart(2, '0')} / {effects.length}</span><div><button className="small-icon" onClick={() => adjacentEffect(-1)} aria-label="Previous effect"><ChevronLeft size={18}/></button><button className="small-icon" onClick={() => adjacentEffect(1)} aria-label="Next effect"><ChevronRight size={18}/></button></div></div>
       </aside>
     </main>
 

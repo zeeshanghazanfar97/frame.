@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
+const previewUrl=process.env.FRAME_PREVIEW_URL??'http://127.0.0.1:5173';
 
 export default defineConfig({
   testDir: './tests/browser',
@@ -9,7 +10,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: previewUrl,
     permissions: ['camera', 'microphone'],
     trace: 'retain-on-failure',
     launchOptions: { args: [
@@ -22,5 +23,5 @@ export default defineConfig({
     { name: 'chromium', testIgnore: '**/webkit.spec.ts', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1050 } } },
     { name: 'webkit', testMatch: '**/webkit.spec.ts', use: { ...devices['Desktop Safari'], permissions: [], launchOptions: { args: [] }, viewport: { width: 1200, height: 900 } } },
   ],
-  webServer: { command: 'npm run dev', url: 'http://127.0.0.1:5173', reuseExistingServer: !process.env.CI },
+  webServer: { command: `npm run dev -- --port ${new URL(previewUrl).port}`, url:previewUrl, reuseExistingServer: !process.env.CI },
 });

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { readFile,writeFile } from 'node:fs/promises';
 import { frameHands } from '../fixtures/hands';
+import catalog from '../../src/media/filter-catalog.json' with {type:'json'};
 
 async function fixtureTracking(page: Page, microphoneDenied = false) {
   await page.addInitScript(({ hands, microphoneDenied }) => {
@@ -54,10 +55,10 @@ async function openCamera(page: Page) {
 
 test('library, guidance, categories, and mobile layout', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('button', { name: /^Select .* effect$/ })).toHaveCount(12);
+  await expect(page.getByRole('button', { name: /^Select .* effect$/ })).toHaveCount(catalog.length);
   await expect(page.getByRole('button', { name: 'Select Pixel effect' })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Texture', exact: true }).click();
-  await expect(page.getByRole('button', { name: /^Select .* effect$/ })).toHaveCount(4);
+  await expect(page.getByRole('button', { name: /^Select .* effect$/ })).toHaveCount(catalog.filter(effect=>effect.category==='Texture').length);
   await page.getByRole('button', { name: 'How it works' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape'); await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -81,6 +82,7 @@ test('GPU masking, photo export, all presets, tracking loss, and cleanup', async
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await fixtureTracking(page); await openCamera(page);
+  await expect(page.getByText(/GPU accelerated/)).toBeVisible();
   await page.getByRole('button', { name: 'Select Mono effect' }).click();
   await page.waitForTimeout(500);
   await expect(page.getByText('Window active', { exact: true })).toBeVisible();
@@ -178,7 +180,7 @@ test('real MediaPipe worker loads same-origin assets and handles camera frames',
   await page.waitForTimeout(1200);
   expect(assets.some(url => url.endsWith('hand_landmarker.task'))).toBe(true);
   expect(assets.some(url => url.endsWith('.wasm'))).toBe(true);
-  expect(assets.every(url => url.startsWith('http://127.0.0.1:5173/'))).toBe(true);
+  expect(assets.every(url => url.startsWith(`${new URL(page.url()).origin}/`))).toBe(true);
   expect(errors).toEqual([]);
   await page.getByRole('button', { name: 'Close camera', exact: true }).click();
 });
@@ -222,4 +224,102 @@ test('tracking initialization failure releases the camera and offers retry', asy
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await expect(page.getByText('Window active', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { fixtureUnhandled: string[] }).fixtureUnhandled)).toEqual([]);
+});
+
+test('full-video mode skips tracking and switches to a hand window without restarting the camera',async({page})=>{
+  await fixtureTracking(page);await page.goto('/');
+  await page.getByRole('button',{name:'Full video',exact:true}).click();
+  await page.getByRole('button',{name:'Open your camera',exact:true}).click();
+  await expect(page.getByText('Full video',{exact:true}).last()).toBeVisible();
+  await expect(page.getByText(/GPU accelerated/)).toBeVisible();
+  await page.getByRole('button',{name:'Select Mono effect'}).click();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(()=>(window as unknown as {fixtureFrameCount:number}).fixtureFrameCount)).toBe(0);
+  const event=page.waitForEvent('download');await page.getByRole('button',{name:'Take photo'}).click();
+  const image=(await readFile((await(await event).path())!)).toString('base64');
+  const corners=await page.evaluate(async image=>{
+    const bitmap=await createImageBitmap(await(await fetch(`data:image/png;base64,${image}`)).blob());
+    const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;const context=canvas.getContext('2d')!;context.drawImage(bitmap,0,0);
+    const samples=[[.05,.05],[.5,.4],[.95,.95]].map(([x,y])=>[...context.getImageData(Math.floor(x*canvas.width),Math.floor(y*canvas.height),1,1).data]);bitmap.close();return samples;
+  },image);
+  for(const rgba of corners){expect(rgba[3]).toBe(255);expect(Math.max(...rgba.slice(0,3))-Math.min(...rgba.slice(0,3))).toBeLessThan(5);}
+  await page.getByRole('button',{name:'Hand window',exact:true}).click();await expect(page.getByText('Window active',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>(window as unknown as {fixtureTracks:MediaStreamTrack[]}).fixtureTracks.filter(track=>track.kind==='video').length)).toBe(1);
+  await page.getByRole('button',{name:'Full video',exact:true}).click();
+  const before=await page.evaluate(()=>(window as unknown as {fixtureFrameCount:number}).fixtureFrameCount);await page.waitForTimeout(400);
+  expect(await page.evaluate(()=>(window as unknown as {fixtureFrameCount:number}).fixtureFrameCount)).toBe(before);
+});
+
+test('Canvas fallback works without WebGL or hand-tracking APIs and exports the whole frame',async({playwright})=>{
+  const args=(test.info().project.use.launchOptions?.args??[]).filter(arg=>!arg.includes('swiftshader'));
+  const browser=await playwright.chromium.launch({args:[...args,'--disable-webgl','--disable-webgl2']});
+  const page=await browser.newPage({permissions:['camera','microphone']});
+  await fixtureTracking(page);
+  await page.goto('/');
+  await page.evaluate(()=>{
+    const original=HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext=function(this:HTMLCanvasElement,type:string,...args:unknown[]){if(type==='webgl'||type==='webgl2'||type==='experimental-webgl')return null;return Reflect.apply(original,this,[type,...args]);} as typeof original;
+    Object.defineProperty(window,'Worker',{value:undefined,configurable:true});
+  });
+  await page.getByRole('button',{name:'Full video',exact:true}).click();
+  await page.getByRole('button',{name:'Open your camera',exact:true}).click();
+  await expect(page.getByText(/Compatibility mode/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Select ASCII effect'})).toBeDisabled();
+  await page.getByRole('button',{name:'Select Cartoon effect'}).click();
+  await expect(page.getByTestId('camera-canvas')).toBeVisible();
+  const event=page.waitForEvent('download');await page.getByRole('button',{name:'Take photo'}).click();
+  expect((await readFile((await(await event).path())!)).length).toBeGreaterThan(1000);
+  await page.getByRole('button',{name:'Close camera',exact:true}).click();
+  await browser.close();
+});
+
+test('all expanded library filters render and can be recorded in full-video mode',async({page})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+  await fixtureTracking(page);await page.goto('/');await page.getByRole('button',{name:'Full video',exact:true}).click();
+  await page.getByRole('button',{name:'Open your camera',exact:true}).click();await expect(page.getByTestId('camera-canvas')).toBeVisible();
+  for(const effect of catalog){await page.getByRole('button',{name:`Select ${effect.label} effect`}).click();await page.waitForTimeout(150);}
+  await page.getByRole('button',{name:'Select Cartoon effect'}).click();
+  await page.getByRole('button',{name:'Record video'}).click();await expect(page.getByRole('button',{name:'Stop recording'})).toContainText('Stop');await page.waitForTimeout(700);await page.getByRole('button',{name:'Stop recording'}).click();
+  await expect(page.getByLabel('Recorded video preview')).toBeVisible();expect(errors).toEqual([]);
+});
+
+test('GPU pass benchmark uses fewer draw calls than the previous compositor',async({page})=>{
+  await fixtureTracking(page);await page.goto('/');await page.getByRole('button',{name:'Full video',exact:true}).click();await page.getByRole('button',{name:'Open your camera',exact:true}).click();await expect(page.getByTestId('camera-canvas')).toBeVisible();
+  const metrics=await page.evaluate(async()=>{
+    const oldUrl='/tests/fixtures/legacy-compositor.ts',newUrl='/src/media/compositor.ts';
+    const Legacy=(await import(/* @vite-ignore */oldUrl)).Compositor,Current=(await import(/* @vite-ignore */newUrl)).Compositor;
+    const video=document.querySelector<HTMLVideoElement>('.camera-source')!;
+    const left=document.createElement('div'),right=document.createElement('div');
+    const previous=new Legacy(),current=new Current();await previous.init(video,left,1280,true);await current.init(video,right,1280,true);
+    const portal={corners:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],visibility:1,phase:'active'};
+    let calls=0;const restores:(()=>void)[]=[];
+    for(const key of ['drawArrays','drawElements','drawArraysInstanced','drawElementsInstanced']){
+      const prototype=WebGL2RenderingContext.prototype as unknown as Record<string,(...args:unknown[])=>unknown>;
+      const original=prototype[key];if(!original)continue;
+      prototype[key]=function(...args:unknown[]){calls++;return Reflect.apply(original,this,args);};restores.push(()=>{prototype[key]=original;});
+    }
+    const measure=(renderer:typeof previous)=>{
+      for(let i=0;i<4;i++)renderer.render(portal,1,i/30,true,'full');
+      calls=0;const start=performance.now();for(let i=0;i<40;i++)renderer.render(portal,1,i/30,true,'full');
+      return {drawsPerFrame:calls/40,submissionMs:(performance.now()-start)/40};
+    };
+    const baseline=measure(previous),optimized=measure(current);
+    restores.forEach(restore=>restore());current.destroy();previous.destroy();return {baseline,optimized};
+  });
+  await writeFile('.sites-runtime/render-benchmark.json',JSON.stringify(metrics,null,2));
+  expect(metrics.optimized.drawsPerFrame).toBeLessThanOrEqual(metrics.baseline.drawsPerFrame/2);
+});
+
+test('learned anime model loads locally, processes frames, and exports an image',async({page})=>{
+  test.setTimeout(90_000);
+  const failures:string[]=[];page.on('console',message=>{if(message.type()==='error')failures.push(message.text());});
+  await fixtureTracking(page);await page.goto('/');await page.getByRole('button',{name:'Full video',exact:true}).click();
+  await page.getByRole('button',{name:'Open your camera',exact:true}).click();await expect(page.getByTestId('camera-canvas')).toBeVisible();
+  await page.getByRole('button',{name:'Select Anime AI effect'}).click();
+  await expect(page.getByText(/AI anime · \d+(?:\.\d+)? processed frames\/sec/)).toBeVisible({timeout:60_000});
+  await page.screenshot({path:'.sites-runtime/anime-ai.png',fullPage:true});
+  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Take photo'}).click();
+  expect((await readFile((await(await download).path())!)).length).toBeGreaterThan(1000);
+  await page.getByRole('button',{name:'Select Pixel effect'}).click();await expect(page.getByText(/processed frames\/sec/)).toHaveCount(0);
+  expect(failures).toEqual([]);
 });

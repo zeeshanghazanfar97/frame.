@@ -3,6 +3,8 @@ export interface Landmark extends Point { z: number }
 export type Corners = [Point, Point, Point, Point];
 export type GesturePhase = 'searching' | 'candidate' | 'active' | 'lost';
 export interface PortalState { corners: Corners | null; visibility: number; phase: GesturePhase }
+export type ApplyMode = 'window' | 'full';
+export type RenderBackend = 'webgl' | 'canvas';
 export interface EngineStatus {
   state: 'idle' | 'loading' | 'running' | 'paused' | 'error';
   message: string;
@@ -11,6 +13,10 @@ export interface EngineStatus {
   inferenceMs: number;
   delegate: 'GPU' | 'CPU' | null;
   quality: number;
+  mode: ApplyMode;
+  renderer: RenderBackend | null;
+  renderMs: number;
+  effectFps: number;
 }
 export type WorkerRequest =
   | { type: 'INIT'; assetRoot: string }

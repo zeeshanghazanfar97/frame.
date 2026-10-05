@@ -19,3 +19,7 @@ if (!exists) {
   await rename(`${model}.tmp`, model);
 }
 console.log('MediaPipe model and WASM assets are available from the app origin.');
+await mkdir('public/models/style-wasm',{recursive:true});
+for(const file of await readdir('node_modules/@tensorflow/tfjs-backend-wasm/dist')){
+  if(file.endsWith('.wasm'))await copyFile(`node_modules/@tensorflow/tfjs-backend-wasm/dist/${file}`,`public/models/style-wasm/${file}`);
+}

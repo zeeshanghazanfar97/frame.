@@ -13,9 +13,12 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
+    "@tensorflow/tfjs": "4.22.0",
+    "@tensorflow/tfjs-backend-wasm": "4.22.0",
     "lucide-react": "1.52.0",
     "pixi-filters": "6.1.5",
     "pixi.js": "8.22.0",
+    "protobufjs": "8.8.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

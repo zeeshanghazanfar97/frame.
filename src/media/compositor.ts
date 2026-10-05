@@ -1,176 +1,179 @@
-import { Application, Container, Filter, GlProgram, Rectangle, RenderTexture, Sprite, Texture, VideoSource } from 'pixi.js';
+import { Application, Container, GlProgram, Mesh, MeshGeometry, Rectangle, RendererType, RenderTexture, Shader, Sprite, Texture, VideoSource } from 'pixi.js';
 import { getEffect, type EffectInstance } from './effects';
 import { fitSize } from './geometry';
-import type { PortalState } from './types';
+import type { ApplyMode, PortalState } from './types';
+import type { VideoRenderer } from './rendering';
 
 const vertex = `
 precision highp float;
 in vec2 aPosition;
-out vec2 vTextureCoord;
-uniform vec4 uInputSize;
-uniform vec4 uOutputFrame;
-uniform vec4 uOutputTexture;
+in vec2 aUV;
+out vec2 vUV;
+uniform mat3 uProjectionMatrix;
+uniform mat3 uWorldTransformMatrix;
+uniform mat3 uTransformMatrix;
 void main() {
-  vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
-  position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
-  position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
-  gl_Position = vec4(position, 0.0, 1.0);
-  vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
+  vec3 position = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix * vec3(aPosition, 1.0);
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+  vUV = aUV;
 }`;
 const fragment = `
 precision highp float;
-in vec2 vTextureCoord;
+in vec2 vUV;
 out vec4 finalColor;
-uniform sampler2D uTexture;
 uniform sampler2D uRawTexture;
-uniform vec4 uInputSize;
+uniform sampler2D uFilteredTexture;
 uniform vec4 uTop;
 uniform vec4 uBottom;
 uniform vec2 uSize;
 uniform float uVisibility;
 uniform float uStrength;
+uniform float uMirror;
+uniform float uFull;
 float edge(vec2 a, vec2 b, vec2 p) {
-  vec2 direction = (b - a) * uSize;
-  vec2 offset = (p - a) * uSize;
-  return (direction.x * offset.y - direction.y * offset.x) / max(length(direction), 0.001);
+  vec2 direction = (b-a)*uSize;
+  vec2 offset = (p-a)*uSize;
+  return (direction.x*offset.y-direction.y*offset.x)/max(length(direction),0.001);
 }
 void main() {
-  // Filter buffers can be rounded up; raw and filtered images use the same UV scale.
-  vec2 uv = vTextureCoord * uInputSize.xy / uSize;
-  vec2 a = uTop.xy; vec2 b = uTop.zw; vec2 c = uBottom.xy; vec2 d = uBottom.zw;
-  float direction = sign((b.x-a.x)*(c.y-b.y) - (b.y-a.y)*(c.x-b.x));
-  float nearEdge = min(min(direction*edge(a,b,uv), direction*edge(b,c,uv)),
-                       min(direction*edge(c,d,uv), direction*edge(d,a,uv)));
-  float mask = smoothstep(-0.75, 0.75, nearEdge) * uVisibility * uStrength;
+  vec2 uv = vec2(mix(vUV.x, 1.0-vUV.x, uMirror), vUV.y);
   vec4 raw = texture(uRawTexture, uv);
-  vec4 filtered = texture(uTexture, vTextureCoord);
-  finalColor = mix(raw, filtered, mask);
+  float mask = uFull;
+  if(uFull < 0.5 && uVisibility > 0.0) {
+    vec2 a=uTop.xy,b=uTop.zw,c=uBottom.xy,d=uBottom.zw;
+    float direction=sign((b.x-a.x)*(c.y-b.y)-(b.y-a.y)*(c.x-b.x));
+    float nearEdge=min(min(direction*edge(a,b,uv),direction*edge(b,c,uv)),min(direction*edge(c,d,uv),direction*edge(d,a,uv)));
+    mask=smoothstep(-0.75,0.75,nearEdge)*uVisibility;
+  }
+  float amount=mask*uStrength;
+  finalColor=amount>0.0 ? mix(raw,texture(uFilteredTexture,uv),amount) : raw;
 }`;
 
-export class Compositor {
+/** One selected-effect target plus a direct mesh blend. No raw or combined copies. */
+export class Compositor implements VideoRenderer {
+  readonly backend = 'webgl' as const;
   readonly app = new Application();
-  private raw!: RenderTexture;
   private filtered!: RenderTexture;
-  private combined!: RenderTexture;
   private source!: VideoSource;
   private videoTexture!: Texture;
   private sourceSprite!: Sprite;
-  private mixSprite!: Sprite;
-  private display!: Sprite;
   private sourceStage = new Container();
-  private mixStage = new Container();
-  private mixFilter!: Filter;
+  private mesh!: Mesh<MeshGeometry, Shader>;
+  private shader!: Shader;
+  private geometry!: MeshGeometry;
   private effect: EffectInstance | null = null;
   private effectId = 'pixelate';
-  private mirror = true;
   private width = 0;
   private height = 0;
   private destroyed = false;
+  private filterDirty = true;
+  private top = new Float32Array(4);
+  private bottom = new Float32Array(4);
+  private neuralRaw=document.createElement('canvas');
+  private neuralStyled=document.createElement('canvas');
+  private neuralRawTexture:Texture|null=null;
+  private neuralStyledTexture:Texture|null=null;
+  private neuralReady=false;
 
   async init(video: HTMLVideoElement, host: HTMLElement, longEdge: number, mirror: boolean): Promise<void> {
     const size = fitSize(video.videoWidth, video.videoHeight, longEdge);
     await this.app.init({ preference: 'webgl', width: size.width, height: size.height, resolution: 1, antialias: false, backgroundAlpha: 1, autoStart: false, powerPreference: 'high-performance' });
+    if(this.app.renderer.type!==RendererType.WEBGL){this.destroy();throw new Error('WebGL is unavailable.');}
     if (this.destroyed) { this.app.destroy(true); throw new Error('Camera startup was cancelled.'); }
     this.app.stop();
     this.source = new VideoSource({ resource: video, autoPlay: false, autoLoad: false });
     this.source.autoUpdate = false;
-    // Await loading so cancellation cannot leave an unobserved preload promise.
     await this.source.load();
     if (this.destroyed) throw new Error('Camera startup was cancelled.');
     this.videoTexture = new Texture({ source: this.source });
     this.sourceSprite = new Sprite(this.videoTexture);
     this.sourceStage.addChild(this.sourceSprite);
-    this.raw = RenderTexture.create({ ...size, resolution: 1 });
     this.filtered = RenderTexture.create({ ...size, resolution: 1 });
-    this.combined = RenderTexture.create({ ...size, resolution: 1 });
-    this.mixFilter = new Filter({ glProgram: GlProgram.from({ vertex, fragment }), resources: {
-      uRawTexture: this.raw.source,
+    this.shader = new Shader({ glProgram: GlProgram.from({ vertex, fragment }), resources: {
+      uRawTexture: this.source,
+      uFilteredTexture: this.filtered.source,
       portalUniforms: {
-        uTop: { value: new Float32Array(4), type: 'vec4<f32>' },
-        uBottom: { value: new Float32Array(4), type: 'vec4<f32>' },
-        uSize: { value: new Float32Array([size.width, size.height]), type: 'vec2<f32>' },
-        uVisibility: { value: 0, type: 'f32' },
-        uStrength: { value: 1, type: 'f32' },
+        uTop: { value: this.top, type: 'vec4<f32>' }, uBottom: { value: this.bottom, type: 'vec4<f32>' },
+        uSize: { value: new Float32Array([size.width,size.height]), type: 'vec2<f32>' },
+        uVisibility: { value: 0, type: 'f32' }, uStrength: { value: 1, type: 'f32' },
+        uMirror: { value: mirror ? 1 : 0, type: 'f32' }, uFull: { value: 0, type: 'f32' },
       },
     } });
-    this.mixSprite = new Sprite(this.filtered);
-    this.mixStage.addChild(this.mixSprite);
-    this.mixSprite.filters = [this.mixFilter];
-    this.display = new Sprite(this.combined);
-    this.app.stage.addChild(this.display);
-    this.mirror = mirror;
+    this.geometry = new MeshGeometry({});
+    this.mesh = new Mesh({ geometry: this.geometry, shader: this.shader });
+    this.app.stage.addChild(this.mesh);
     this.resize(longEdge, video.videoWidth, video.videoHeight);
     this.setEffect(this.effectId);
-    this.app.canvas.setAttribute('aria-label', 'Live camera with fingertip-controlled effect');
-    this.app.canvas.setAttribute('data-testid', 'camera-canvas');
+    this.app.canvas.setAttribute('aria-label','Live camera with selected effect');
+    this.app.canvas.setAttribute('data-testid','camera-canvas');
     host.replaceChildren(this.app.canvas);
-    // Compile the selected effect and compositor before the first gesture arrives.
-    this.render({ corners: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }], visibility: 1, phase: 'candidate' }, 0, 0, true);
+    this.render({ corners: null, visibility: 0, phase: 'searching' }, 0, 0, true);
   }
 
   setEffect(id: string): void {
+    this.clearNeuralFrame();
     this.effectId = id;
     if (!this.sourceSprite) return;
     this.sourceSprite.filters = [];
-    this.effect?.destroy();
-    this.effect = getEffect(id).create();
+    this.effect?.destroy(); this.effect = getEffect(id).create(); this.filterDirty = true;
   }
+  setNeuralFrame(original:ImageBitmap,styled:ImageBitmap):void{
+    for(const [canvas,image] of [[this.neuralRaw,original],[this.neuralStyled,styled]] as const){canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d')!.drawImage(image,0,0);}
+    this.neuralRawTexture??=Texture.from(this.neuralRaw);this.neuralStyledTexture??=Texture.from(this.neuralStyled);
+    this.neuralRawTexture.source.resize(original.width,original.height);this.neuralStyledTexture.source.resize(styled.width,styled.height);
+    this.neuralRawTexture.source.update();this.neuralStyledTexture.source.update();this.neuralReady=true;
+  }
+  clearNeuralFrame():void{this.neuralReady=false;}
 
   resize(longEdge: number, sourceWidth: number, sourceHeight: number): void {
-    const size = fitSize(sourceWidth, sourceHeight, longEdge);
-    if (this.width === size.width && this.height === size.height) return;
-    this.width = size.width; this.height = size.height;
-    this.app.renderer.resize(size.width, size.height);
-    for (const texture of [this.raw, this.filtered, this.combined]) texture.resize(size.width, size.height);
-    this.sourceSprite.width = size.width; this.sourceSprite.height = size.height;
-    this.sourceSprite.filterArea = new Rectangle(0, 0, size.width, size.height);
-    this.mixSprite.width = size.width; this.mixSprite.height = size.height;
-    this.mixSprite.filterArea = new Rectangle(0, 0, size.width, size.height);
-    this.display.width = size.width; this.display.height = size.height;
-    this.display.scale.x = Math.abs(this.display.scale.x) * (this.mirror ? -1 : 1);
-    this.display.x = this.mirror ? size.width : 0;
-    this.mixFilter.resources.portalUniforms.uniforms.uSize = new Float32Array([size.width, size.height]);
+    const size = fitSize(sourceWidth,sourceHeight,longEdge);
+    if (this.width===size.width && this.height===size.height) return;
+    this.width=size.width; this.height=size.height;
+    this.app.renderer.resize(size.width,size.height); this.filtered.resize(size.width,size.height);
+    this.sourceSprite.width=size.width; this.sourceSprite.height=size.height;
+    this.sourceSprite.filterArea=new Rectangle(0,0,size.width,size.height);
+    this.geometry.positions=new Float32Array([0,0,size.width,0,size.width,size.height,0,size.height]);
+    this.geometry.uvs=new Float32Array([0,0,1,0,1,1,0,1]);
+    this.shader.resources.portalUniforms.uniforms.uSize=new Float32Array([size.width,size.height]);
+    this.filterDirty=true;
   }
 
-  render(portal: PortalState, strength: number, seconds: number, newFrame: boolean): void {
+  render(portal: PortalState, strength: number, seconds: number, newFrame: boolean, mode: ApplyMode='window'): void {
     if (this.destroyed) return;
     if (newFrame) this.source.update();
-    const uniforms = this.mixFilter.resources.portalUniforms.uniforms;
-    const corners = portal.corners;
-    uniforms.uVisibility = corners ? portal.visibility : 0;
-    uniforms.uStrength = strength;
-    if (corners) {
-      uniforms.uTop = new Float32Array([corners[0].x, corners[0].y, corners[1].x, corners[1].y]);
-      uniforms.uBottom = new Float32Array([corners[2].x, corners[2].y, corners[3].x, corners[3].y]);
+    const uniforms=this.shader.resources.portalUniforms.uniforms;
+    uniforms.uVisibility=portal.corners ? portal.visibility : 0;
+    uniforms.uStrength=strength; uniforms.uFull=mode==='full' ? 1 : 0;
+    if (portal.corners) {
+      const c=portal.corners; this.top.set([c[0].x,c[0].y,c[1].x,c[1].y]); this.bottom.set([c[2].x,c[2].y,c[3].x,c[3].y]);
     }
-    this.sourceSprite.filters = [];
-    this.app.renderer.render({ container: this.sourceStage, target: this.raw, clear: true });
-    if (portal.visibility > 0 && this.effect) {
-      this.effect.update(seconds);
-      this.sourceSprite.filters = this.effect.filters;
-      this.app.renderer.render({ container: this.sourceStage, target: this.filtered, clear: true });
-      this.app.renderer.render({ container: this.mixStage, target: this.combined, clear: true });
-      this.display.texture = this.combined;
-    } else this.display.texture = this.raw;
-    this.app.renderer.render({ container: this.app.stage, clear: true });
+    const visible=strength>0 && (mode==='full' || portal.visibility>0);
+    const neural=!!getEffect(this.effectId).model;
+    if(neural&&!visible)this.neuralReady=false;
+    this.shader.resources.uRawTexture=neural&&visible&&this.neuralReady?this.neuralRawTexture!.source:this.source;
+    this.shader.resources.uFilteredTexture=neural&&this.neuralReady?this.neuralStyledTexture!.source:this.filtered.source;
+    if(neural&&!this.neuralReady)uniforms.uStrength=0;
+    if (visible && !neural && this.effect && (newFrame || this.filterDirty || getEffect(this.effectId).animated)) {
+      this.effect.update(seconds); this.sourceSprite.filters=this.effect.filters;
+      this.app.renderer.render({ container:this.sourceStage,target:this.filtered,clear:true });
+      this.filterDirty=false;
+    }
+    this.app.renderer.render({ container:this.app.stage,clear:true });
   }
 
   async photo(): Promise<Blob> {
-    const canvas = this.app.renderer.extract.canvas({ target: this.app.stage }) as HTMLCanvasElement;
-    return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not save this photo.')), 'image/png'));
+    const canvas=this.app.renderer.extract.canvas({ target:this.app.stage }) as HTMLCanvasElement;
+    return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob ? resolve(blob) : reject(new Error('Could not save this photo.')),'image/png'));
   }
   get canvas(): HTMLCanvasElement | null { return this.app.renderer ? this.app.canvas : null; }
   destroy(): void {
-    if (this.destroyed) return;
-    this.destroyed = true;
-    if (this.sourceSprite) this.sourceSprite.filters = [];
-    if (this.mixSprite) this.mixSprite.filters = [];
-    this.effect?.destroy(); this.mixFilter?.destroy();
-    this.sourceSprite?.destroy(); this.mixSprite?.destroy(); this.display?.destroy();
-    this.sourceStage.destroy(); this.mixStage.destroy();
-    this.raw?.destroy(true); this.filtered?.destroy(true); this.combined?.destroy(true);
-    if (this.videoTexture) this.videoTexture.destroy(true);
-    else this.source?.destroy();
-    if (this.app.renderer) this.app.destroy(true);
+    if (this.destroyed) return; this.destroyed=true;
+    if(this.sourceSprite) this.sourceSprite.filters=[];
+    this.effect?.destroy(); this.shader?.destroy(); this.mesh?.destroy(); this.geometry?.destroy();
+    this.sourceSprite?.destroy(); this.sourceStage.destroy();
+    if(this.app.renderer) this.app.destroy(true);
+    this.filtered?.destroy(true);
+    this.neuralRawTexture?.destroy(true);this.neuralStyledTexture?.destroy(true);
+    if(this.videoTexture) this.videoTexture.destroy(true); else this.source?.destroy();
   }
 }

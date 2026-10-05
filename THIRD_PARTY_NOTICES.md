@@ -9,6 +9,10 @@ This project uses the following open-source components. Preserve their upstream 
 | PixiJS Filters | MIT | https://github.com/pixijs/filters |
 | MediaPipe Tasks Vision and bundled WASM | Apache-2.0 | https://github.com/google-ai-edge/mediapipe |
 | Lucide icons | ISC | https://github.com/lucide-icons/lucide |
+| TensorFlow.js and WASM backend | Apache-2.0 | https://github.com/tensorflow/tfjs |
+| DCT-Net anime head model | Apache-2.0 | https://modelscope.cn/models/damo/cv_unet_person-image-cartoon_compound-models/summary |
+
+The DCT-Net model is Alibaba's officially published `cartoon_h.pb`, SHA-256 `338e7bf7ab4014ba9da864c2dda104f26d8af6c7f468038782d92ccc8e2dedda`. Its official ModelScope metadata identifies the model license as Apache License 2.0. Frame extracts the frozen graph constants into TensorFlow.js weight files, preserving network operators and weights. This is the anime head generator alone; the original compound pipeline's face detection, alignment, and background blending are not included. See `public/models/dct-anime/provenance.json` and the included `public/licenses/dct-net.txt`.
 
 The bundled hand-landmark model is the MediaPipe HandLandmarker float16 model, revision 1, licensed under Apache-2.0 according to Google's linked model card, and downloaded from:
 

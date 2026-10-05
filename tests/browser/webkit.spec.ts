@@ -67,3 +67,11 @@ test('WebKit loads the real MediaPipe module worker and model', async ({ page })
   await expect(page.getByText('Make two L-shaped hands', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close camera', exact: true }).click();
 });
+
+test('WebKit processes learned anime with a native worker and CPU/GPU fallback',async({page})=>{
+  test.setTimeout(90_000);await page.goto('/');await canvasCamera(page,false);
+  await page.getByRole('button',{name:'Full video',exact:true}).click();await page.getByRole('button',{name:'Open your camera',exact:true}).click();
+  await expect(page.getByTestId('camera-canvas')).toBeVisible();await page.getByRole('button',{name:'Select Anime AI effect'}).click();
+  await expect(page.getByText(/AI anime · \d+(?:\.\d+)? processed frames\/sec/)).toBeVisible({timeout:65_000});
+  await page.getByRole('button',{name:'Select Cartoon effect'}).click();await page.getByRole('button',{name:'Close camera',exact:true}).click();
+});

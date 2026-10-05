@@ -1,0 +1,356 @@
+[
+  {
+    "id": "grayscale",
+    "label": "Mono",
+    "category": "Color",
+    "description": "Clean black and white",
+    "thumbnail": "grayscale",
+    "provider": "matrix",
+    "method": "desaturate",
+    "canvas": "grayscale"
+  },
+  {
+    "id": "sepia",
+    "label": "Sepia",
+    "category": "Color",
+    "description": "Warm, sun-aged tones",
+    "thumbnail": "sepia",
+    "provider": "matrix",
+    "method": "sepia",
+    "canvas": "sepia"
+  },
+  {
+    "id": "negative",
+    "label": "Negative",
+    "category": "Color",
+    "description": "Turn every color inside out",
+    "thumbnail": "negative",
+    "provider": "matrix",
+    "method": "negative",
+    "canvas": "negative"
+  },
+  {
+    "id": "warm",
+    "label": "Golden",
+    "category": "Color",
+    "description": "A touch of golden hour",
+    "thumbnail": "warm",
+    "provider": "matrix",
+    "matrix": [
+      1.12,
+      0,
+      0,
+      0,
+      0.035,
+      0,
+      1.02,
+      0,
+      0,
+      0.012,
+      0,
+      0,
+      0.85,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "canvas": "warm"
+  },
+  {
+    "id": "cool",
+    "label": "Ice",
+    "category": "Color",
+    "description": "Cool blues and soft shadows",
+    "thumbnail": "cool",
+    "provider": "matrix",
+    "matrix": [
+      0.85,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1.03,
+      0,
+      0,
+      0.01,
+      0,
+      0,
+      1.16,
+      0,
+      0.025,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "canvas": "cool"
+  },
+  {
+    "id": "pixelate",
+    "label": "Pixel",
+    "category": "Texture",
+    "description": "A pixel mosaic",
+    "thumbnail": "pixelate",
+    "provider": "pixi",
+    "filter": "PixelateFilter",
+    "options": {
+      "size": 12
+    },
+    "canvas": "pixelate"
+  },
+  {
+    "id": "ascii",
+    "label": "ASCII",
+    "category": "Texture",
+    "description": "Your world, written in characters",
+    "thumbnail": "ascii",
+    "provider": "pixi",
+    "filter": "AsciiFilter",
+    "options": {
+      "size": 8
+    }
+  },
+  {
+    "id": "crosshatch",
+    "label": "Sketch",
+    "category": "Texture",
+    "description": "A pen-and-ink crosshatch",
+    "thumbnail": "crosshatch",
+    "provider": "pixi",
+    "filter": "CrossHatchFilter"
+  },
+  {
+    "id": "oldfilm",
+    "label": "Old film",
+    "category": "Texture",
+    "description": "Grain, scratches, and nostalgia",
+    "thumbnail": "oldfilm",
+    "provider": "pixi",
+    "filter": "OldFilmFilter",
+    "options": {
+      "sepia": 0.35,
+      "noise": 0.18,
+      "scratch": 0.4,
+      "vignetting": 0.2
+    },
+    "animated": true
+  },
+  {
+    "id": "crt",
+    "label": "Retro TV",
+    "category": "Play",
+    "description": "Scanlines and television noise",
+    "thumbnail": "crt",
+    "provider": "pixi",
+    "filter": "CRTFilter",
+    "options": {
+      "curvature": 0,
+      "lineWidth": 2,
+      "lineContrast": 0.2,
+      "noise": 0.08,
+      "vignetting": 0.15
+    },
+    "animated": true
+  },
+  {
+    "id": "rgbsplit",
+    "label": "Prism",
+    "category": "Play",
+    "description": "Split the spectrum",
+    "thumbnail": "rgbsplit",
+    "provider": "pixi",
+    "filter": "RGBSplitFilter",
+    "options": {
+      "red": {
+        "x": -5,
+        "y": 0
+      },
+      "green": {
+        "x": 0,
+        "y": 0
+      },
+      "blue": {
+        "x": 5,
+        "y": 0
+      }
+    }
+  },
+  {
+    "id": "bloom",
+    "label": "Bloom",
+    "category": "Play",
+    "description": "Let the bright parts glow",
+    "thumbnail": "bloom",
+    "provider": "pixi",
+    "filter": "AdvancedBloomFilter",
+    "options": {
+      "threshold": 0.45,
+      "bloomScale": 0.8,
+      "brightness": 1.05,
+      "blur": 4,
+      "quality": 3
+    }
+  },
+  {
+    "id": "cartoon",
+    "label": "Cartoon",
+    "category": "Style",
+    "description": "Flat colors and drawn contours",
+    "thumbnail": "cartoon",
+    "provider": "toon",
+    "canvas": "cartoon"
+  },
+  {
+    "id": "anime-palette",
+    "label": "Anime palette",
+    "category": "Style",
+    "description": "Cel shading, ink edges, and a vivid palette. A fast graphic effect, not AI face conversion.",
+    "thumbnail": "anime",
+    "provider": "toon",
+    "canvas": "anime"
+  },
+  {
+    "id": "halftone",
+    "label": "Halftone",
+    "category": "Texture",
+    "description": "Comic-print dot patterns",
+    "thumbnail": "crosshatch",
+    "provider": "pixi",
+    "filter": "DotFilter",
+    "options": {
+      "scale": 1,
+      "angle": 5
+    }
+  },
+  {
+    "id": "emboss",
+    "label": "Emboss",
+    "category": "Texture",
+    "description": "Raised metallic texture",
+    "thumbnail": "grayscale",
+    "provider": "pixi",
+    "filter": "EmbossFilter",
+    "options": {
+      "strength": 3
+    }
+  },
+  {
+    "id": "glitch",
+    "label": "Glitch",
+    "category": "Play",
+    "description": "Digital slices and color offsets",
+    "thumbnail": "rgbsplit",
+    "provider": "pixi",
+    "filter": "GlitchFilter",
+    "options": {
+      "slices": 5,
+      "offset": 12
+    },
+    "animated": true
+  },
+  {
+    "id": "twist",
+    "label": "Twist",
+    "category": "Play",
+    "description": "A swirl at the center",
+    "thumbnail": "negative",
+    "provider": "pixi",
+    "filter": "TwistFilter",
+    "options": {
+      "radius": 150,
+      "angle": 2,
+      "offset": {
+        "x": 160,
+        "y": 90
+      }
+    }
+  },
+  {
+    "id": "fisheye",
+    "label": "Fisheye",
+    "category": "Play",
+    "description": "A playful wide-angle bulge",
+    "thumbnail": "cool",
+    "provider": "pixi",
+    "filter": "BulgePinchFilter",
+    "options": {
+      "radius": 0.65,
+      "strength": 0.6
+    }
+  },
+  {
+    "id": "vintage",
+    "label": "Vintage",
+    "category": "Color",
+    "description": "Faded photographic colors",
+    "thumbnail": "oldfilm",
+    "provider": "matrix",
+    "method": "vintage"
+  },
+  {
+    "id": "polaroid",
+    "label": "Instant film",
+    "category": "Color",
+    "description": "Instant-camera color grading",
+    "thumbnail": "warm",
+    "provider": "matrix",
+    "method": "polaroid"
+  },
+  {
+    "id": "technicolor",
+    "label": "Technicolor",
+    "category": "Color",
+    "description": "Rich cinema-inspired colors",
+    "thumbnail": "negative",
+    "provider": "matrix",
+    "method": "technicolor"
+  },
+  {
+    "id": "vibrant",
+    "label": "Vibrant",
+    "category": "Color",
+    "description": "Boost the color spectrum",
+    "thumbnail": "rgbsplit",
+    "provider": "pixi",
+    "filter": "HslAdjustmentFilter",
+    "options": {
+      "saturation": 1.5,
+      "lightness": 1.05
+    }
+  },
+  {
+    "id": "soft",
+    "label": "Soft focus",
+    "category": "Style",
+    "description": "A softly blurred view",
+    "thumbnail": "bloom",
+    "provider": "pixi",
+    "filter": "KawaseBlurFilter",
+    "options": {
+      "blur": 3,
+      "quality": 2
+    }
+  },
+  {
+    "id": "anime-ai",
+    "label": "Anime AI",
+    "category": "Style",
+    "description": "DCT-Net learned anime conversion. Adaptive resolution and frame rate; slower than graphic effects.",
+    "thumbnail": "anime",
+    "provider": "model",
+    "canvas": "model",
+    "model": {
+      "url": "models/dct-anime/model.json",
+      "input": "input_image",
+      "output": "output_image",
+      "size": 160,
+      "colorOrder": "bgr"
+    }
+  }
+]

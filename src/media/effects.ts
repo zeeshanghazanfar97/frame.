@@ -1,55 +1,75 @@
-import { ColorMatrixFilter, type Filter } from 'pixi.js';
-import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
-import { AsciiFilter } from 'pixi-filters/ascii';
-import { CrossHatchFilter } from 'pixi-filters/cross-hatch';
-import { CRTFilter } from 'pixi-filters/crt';
-import { OldFilmFilter } from 'pixi-filters/old-film';
-import { PixelateFilter } from 'pixi-filters/pixelate';
-import { RGBSplitFilter } from 'pixi-filters/rgb-split';
-
-export type EffectCategory = 'Color' | 'Texture' | 'Play';
-export interface EffectInstance {
-  filters: Filter[];
-  update(seconds: number): void;
-  destroy(): void;
-}
+import { ColorMatrixFilter, Filter, GlProgram } from 'pixi.js';
+import * as collection from 'pixi-filters';
+import catalog from './filter-catalog.json';
+export type EffectCategory = 'Color' | 'Texture' | 'Play' | 'Style';
+export interface EffectInstance { filters: Filter[]; update(seconds: number): void; destroy(): void }
 export interface EffectDefinition {
-  id: string;
-  label: string;
-  category: EffectCategory;
-  description: string;
-  thumbnail: string;
-  create(): EffectInstance;
+  id: string; label: string; category: EffectCategory; description: string; thumbnail: string;
+  animated: boolean; canvas: string | null; source: string; create(): EffectInstance;
+  model?: {url:string;input:string;output:string;size:number;colorOrder:'rgb'|'bgr'};
+}
+export interface EffectSpec {
+  id: string; label: string; category: string; description: string; thumbnail: string;
+  provider: string; method?: string; matrix?: number[]; filter?: string;
+  options?: Record<string, unknown>; animated?: boolean; canvas?: string;
+  model?: {url:string;input:string;output:string;size:number;colorOrder:'rgb'|'bgr'};
 }
 
-function instance(filter: Filter, animate?: (seconds: number) => void): EffectInstance {
-  return { filters: [filter], update: animate ?? (() => {}), destroy: () => filter.destroy() };
-}
-function color(apply: (filter: ColorMatrixFilter) => void) {
-  return () => { const filter = new ColorMatrixFilter(); apply(filter); return instance(filter); };
+const filterVertex=`precision highp float;
+in vec2 aPosition; out vec2 vTextureCoord;
+uniform vec4 uInputSize; uniform vec4 uOutputFrame; uniform vec4 uOutputTexture;
+void main(){vec2 p=aPosition*uOutputFrame.zw+uOutputFrame.xy;
+p.x=p.x*(2.0/uOutputTexture.x)-1.0; p.y=p.y*(2.0*uOutputTexture.z/uOutputTexture.y)-uOutputTexture.z;
+gl_Position=vec4(p,0.,1.);vTextureCoord=aPosition*(uOutputFrame.zw*uInputSize.zw);}`;
+const toonFragment=`precision highp float;
+in vec2 vTextureCoord;out vec4 finalColor;uniform sampler2D uTexture;
+uniform vec4 uInputSize;uniform float uAnime;
+float luma(vec3 c){return dot(c,vec3(.299,.587,.114));}
+void main(){vec2 d=uInputSize.zw;vec2 uv=vTextureCoord;
+vec3 c=texture(uTexture,uv).rgb;
+vec3 left=texture(uTexture,uv-vec2(d.x,0.)).rgb,right=texture(uTexture,uv+vec2(d.x,0.)).rgb;
+vec3 up=texture(uTexture,uv-vec2(0.,d.y)).rgb,down=texture(uTexture,uv+vec2(0.,d.y)).rgb;
+vec3 smoothColor=(c*4.+left+right+up+down)/8.;
+float gradient=length(vec2(luma(right)-luma(left),luma(down)-luma(up)));
+float levels=mix(6.,9.,uAnime);vec3 quantized=floor(smoothColor*levels+.5)/levels;
+float gray=luma(quantized);quantized=mix(vec3(gray),quantized,mix(1.08,1.25,uAnime));
+quantized+=uAnime*vec3(.02,.01,.035);
+float ink=smoothstep(.055,.18,gradient);finalColor=vec4(mix(quantized,vec3(.035,.04,.065),ink*.85),1.);}`;
+
+function create(spec: EffectSpec): EffectInstance {
+  if(spec.provider==='model')return {filters:[],update:()=>{},destroy:()=>{}};
+  let filter: Filter;
+  if(spec.provider==='matrix') {
+    const matrix=new ColorMatrixFilter();
+    if(spec.matrix){if(spec.matrix.length!==20)throw new Error('Color matrices need 20 entries.');matrix.matrix=spec.matrix as typeof matrix.matrix;}
+    else {
+      const methods: Record<string,()=>void>={desaturate:()=>matrix.desaturate(),sepia:()=>matrix.sepia(false),negative:()=>matrix.negative(false),vintage:()=>matrix.vintage(false),polaroid:()=>matrix.polaroid(false),technicolor:()=>matrix.technicolor(false)};
+      if(!methods[spec.method!]) throw new Error(`Unknown color preset: ${spec.method}`);
+      methods[spec.method!]();
+    }
+    filter=matrix;
+  } else if(spec.provider==='toon') {
+    filter=new Filter({glProgram:GlProgram.from({vertex:filterVertex,fragment:toonFragment}),resources:{styleUniforms:{uAnime:{value:spec.id==='anime-palette'?1:0,type:'f32'}}}});
+  } else {
+    const Constructor=(collection as unknown as Record<string,new(options?: unknown)=>Filter>)[spec.filter!];
+    if(!Constructor) throw new Error(`Unknown library filter: ${spec.filter}`);
+    filter=new Constructor(spec.filter==='PixelateFilter' ? spec.options?.size ?? 12 : spec.options ?? {});
+  }
+  return {filters:[filter],update:time=>{
+    const animated=filter as Filter & {time?:number;seed?:number};
+    if('time' in animated) animated.time=time;
+    if('seed' in animated) animated.seed=(Math.floor(time*12)%100)/100;
+  },destroy:()=>filter.destroy()};
 }
 
-export const effects: EffectDefinition[] = [
-  { id: 'grayscale', label: 'Mono', category: 'Color', description: 'Clean black and white', thumbnail: 'grayscale', create: color(f => f.desaturate()) },
-  { id: 'sepia', label: 'Sepia', category: 'Color', description: 'Warm, sun-aged tones', thumbnail: 'sepia', create: color(f => f.sepia(false)) },
-  { id: 'negative', label: 'Negative', category: 'Color', description: 'Turn every color inside out', thumbnail: 'negative', create: color(f => f.negative(false)) },
-  { id: 'warm', label: 'Golden', category: 'Color', description: 'A touch of golden hour', thumbnail: 'warm', create: color(f => { f.matrix = [1.12, 0, 0, 0, 0.035, 0, 1.02, 0, 0, 0.012, 0, 0, 0.85, 0, 0, 0, 0, 0, 1, 0]; }) },
-  { id: 'cool', label: 'Ice', category: 'Color', description: 'Cool blues and soft shadows', thumbnail: 'cool', create: color(f => { f.matrix = [0.85, 0, 0, 0, 0, 0, 1.03, 0, 0, 0.01, 0, 0, 1.16, 0, 0.025, 0, 0, 0, 1, 0]; }) },
-  { id: 'pixelate', label: 'Pixel', category: 'Texture', description: 'Little pixels. Big personality.', thumbnail: 'pixelate', create: () => instance(new PixelateFilter(12)) },
-  { id: 'ascii', label: 'ASCII', category: 'Texture', description: 'Your world, written in characters', thumbnail: 'ascii', create: () => instance(new AsciiFilter({ size: 8 })) },
-  { id: 'crosshatch', label: 'Sketch', category: 'Texture', description: 'A pen-and-ink crosshatch', thumbnail: 'crosshatch', create: () => instance(new CrossHatchFilter()) },
-  { id: 'oldfilm', label: 'Old film', category: 'Texture', description: 'Grain, scratches, and nostalgia', thumbnail: 'oldfilm', create: () => {
-    const filter = new OldFilmFilter({ sepia: 0.35, noise: 0.18, scratch: 0.4, vignetting: 0.2 });
-    return instance(filter, time => { filter.seed = (Math.floor(time * 12) % 100) / 100; });
-  } },
-  { id: 'crt', label: 'Retro TV', category: 'Play', description: 'Straight out of an old television', thumbnail: 'crt', create: () => {
-    const filter = new CRTFilter({ curvature: 0, lineWidth: 2, lineContrast: 0.2, noise: 0.08, vignetting: 0.15 });
-    return instance(filter, time => { filter.time = time; filter.seed = (Math.floor(time * 15) % 100) / 100; });
-  } },
-  { id: 'rgbsplit', label: 'Prism', category: 'Play', description: 'Split the spectrum', thumbnail: 'rgbsplit', create: () => instance(new RGBSplitFilter({ red: { x: -5, y: 0 }, green: { x: 0, y: 0 }, blue: { x: 5, y: 0 } })) },
-  { id: 'bloom', label: 'Bloom', category: 'Play', description: 'Let the bright parts glow', thumbnail: 'bloom', create: () => instance(new AdvancedBloomFilter({ threshold: 0.45, bloomScale: 0.8, brightness: 1.05, blur: 4, quality: 3 })) },
-];
-
-export function getEffect(id: string): EffectDefinition {
-  return effects.find(effect => effect.id === id) ?? effects[5];
+export function buildEffects(specs: EffectSpec[]): EffectDefinition[] {
+  const ids=new Set<string>();
+  return specs.map(spec=>{
+    if(ids.has(spec.id)) throw new Error(`Duplicate filter ID: ${spec.id}`); ids.add(spec.id);
+    return {...spec,category:spec.category as EffectCategory,animated:!!spec.animated,canvas:spec.canvas??null,
+      source:spec.provider==='model'?'https://modelscope.cn/models/damo/cv_unet_person-image-cartoon_compound-models/summary':spec.provider==='pixi'?'https://github.com/pixijs/filters':spec.provider==='matrix'?'https://pixijs.com/8.x/guides/components/filters':'local:cel-shading',create:()=>create(spec)};
+  });
 }
+export const effects=buildEffects(catalog as EffectSpec[]);
+export function getEffect(id:string):EffectDefinition{return effects.find(effect=>effect.id===id)??effects.find(effect=>effect.id==='pixelate')!;}
+export const availableEffects=(backend: 'webgl'|'canvas'|null)=>backend==='canvas'?effects.filter(effect=>effect.canvas):effects;
