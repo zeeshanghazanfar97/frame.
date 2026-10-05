@@ -1,0 +1,5 @@
+# Optional overlay: docker compose -f compose.yaml -f compose.auth.yaml up -d
+services:
+  frame:
+    labels:
+      - "traefik.http.routers.frame.middlewares=${TRAEFIK_MIDDLEWARES:-authentik@file}"

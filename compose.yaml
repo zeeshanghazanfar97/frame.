@@ -1,0 +1,35 @@
+name: ${COMPOSE_PROJECT_NAME:-frame}
+
+services:
+  frame:
+    image: ${FRAME_IMAGE:-frame:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    expose:
+      - "8080"
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik-public}"
+      - "traefik.http.routers.frame.rule=Host(`${APP_DOMAIN:-frame.zeeit.dev}`)"
+      - "traefik.http.routers.frame.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.frame.tls=true"
+      - "traefik.http.routers.frame.tls.certresolver=${TRAEFIK_CERTRESOLVER:-cloudflare}"
+      - "traefik.http.routers.frame.service=frame"
+      - "traefik.http.services.frame.loadbalancer.server.port=8080"
+
+networks:
+  traefik-public:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik-public}
