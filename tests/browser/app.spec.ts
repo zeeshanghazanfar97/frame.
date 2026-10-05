@@ -10,7 +10,7 @@ async function fixtureTracking(page: Page, microphoneDenied = false) {
     const trackStore: MediaStreamTrack[] = [];
     const unhandled: string[] = [];
     window.addEventListener('unhandledrejection', event => unhandled.push(String(event.reason)));
-    Object.assign(window, { fixtureTracks: trackStore, fixturePoseVisible: true, fixtureFrameCount: 0, fixtureWorkerFailures: false, fixtureUnhandled: unhandled });
+    Object.assign(window, { fixtureTracks: trackStore, fixtureHands: hands, fixturePoseVisible: true, fixtureFrameCount: 0, fixtureWorkerFailures: false, fixtureUnhandled: unhandled });
     navigator.mediaDevices.getUserMedia = async constraints => {
       if (microphoneDenied && constraints?.audio) throw new DOMException('Fixture denial', 'NotAllowedError');
       const stream = await nativeMedia(constraints);
@@ -25,7 +25,7 @@ async function fixtureTracking(page: Page, microphoneDenied = false) {
         if (message.type === 'FRAME') { message.image?.close(); (window as unknown as { fixtureFrameCount: number }).fixtureFrameCount++; }
         const result = message.type === 'INIT' ? ((window as unknown as { fixtureWorkerFailures: boolean }).fixtureWorkerFailures ? { type: 'ERROR', message: 'Hand tracking could not load. Check your connection and try again.' } : { type: 'READY', delegate: 'CPU' }) : {
           type: 'RESULT', id: message.id, timestamp: message.timestamp,
-          landmarks: (window as unknown as { fixturePoseVisible: boolean }).fixturePoseVisible ? hands : [], inferenceMs: 2,
+          landmarks: (window as unknown as { fixturePoseVisible: boolean }).fixturePoseVisible ? (window as unknown as { fixtureHands: typeof hands }).fixtureHands : [], inferenceMs: 2,
         };
         setTimeout(() => { if (!this.closed) this.onmessage?.(new MessageEvent('message', { data: result })); }, 2);
       }
@@ -114,7 +114,7 @@ test('GPU masking, photo export, all presets, tracking loss, and cleanup', async
   }
   await page.screenshot({ path: '.sites-runtime/active-camera.png', fullPage: true });
   await page.evaluate(() => { (window as unknown as { fixturePoseVisible: boolean }).fixturePoseVisible = false; });
-  await expect(page.getByText('Make two L-shaped hands', { exact: true })).toBeVisible();
+  await expect(page.getByText('Show both hands', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close camera', exact: true }).click();
   await expect(page.getByTestId('camera-canvas')).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as { fixtureTracks: MediaStreamTrack[] }).fixtureTracks.every(track => track.readyState === 'ended'))).toBe(true);
@@ -164,7 +164,7 @@ test('auto-cycle pauses on pose loss and resumes after reacquisition', async ({ 
   await page.getByRole('button', { name: /Explore hands-free/ }).click();
   await expect(page.getByRole('button', { name: 'Select ASCII effect' })).toHaveAttribute('aria-pressed', 'true', { timeout: 10_000 });
   await page.evaluate(() => { (window as unknown as { fixturePoseVisible: boolean }).fixturePoseVisible = false; });
-  await expect(page.getByText('Make two L-shaped hands', { exact: true })).toBeVisible();
+  await expect(page.getByText('Show both hands', { exact: true })).toBeVisible();
   await page.waitForTimeout(5100);
   await expect(page.getByRole('button', { name: 'Select ASCII effect' })).toHaveAttribute('aria-pressed', 'true');
   await page.evaluate(() => { (window as unknown as { fixturePoseVisible: boolean }).fixturePoseVisible = true; });
@@ -175,7 +175,7 @@ test('real MediaPipe worker loads same-origin assets and handles camera frames',
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const assets: string[] = []; page.on('request', request => { if (request.url().includes('/models/')) assets.push(request.url()); });
   await page.goto('/'); await page.getByRole('button', { name: 'Open your camera', exact: true }).click();
-  await expect(page.getByText('Make two L-shaped hands', { exact: true })).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByText('Show both hands', { exact: true })).toBeVisible({ timeout: 40_000 });
   await expect(page.getByTestId('camera-canvas')).toBeVisible();
   await page.waitForTimeout(1200);
   expect(assets.some(url => url.endsWith('hand_landmarker.task'))).toBe(true);
@@ -322,4 +322,52 @@ test('learned anime model loads locally, processes frames, and exports an image'
   expect((await readFile((await(await download).path())!)).length).toBeGreaterThan(1000);
   await page.getByRole('button',{name:'Select Pixel effect'}).click();await expect(page.getByText(/processed frames\/sec/)).toHaveCount(0);
   expect(failures).toEqual([]);
+});
+
+test('rotated, inverted, close, and concave fingertip windows stay active and render correctly',async({page})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+  await fixtureTracking(page);await openCamera(page);await page.getByRole('button',{name:'Select Mono effect'}).click();
+  const setTips=async(tips:{x:number;y:number}[])=>{
+    const hands=frameHands();[hands[0][8],hands[0][4],hands[1][8],hands[1][4]]=tips.map(p=>({...p,z:0}));
+    await page.evaluate(hands=>{(window as unknown as {fixtureHands:typeof hands}).fixtureHands=hands;},hands);
+    await page.waitForTimeout(750);await expect(page.getByText('Window active',{exact:true})).toBeVisible();
+  };
+  const samplePhoto=async(points:{x:number;y:number}[])=>{
+    const event=page.waitForEvent('download');await page.getByRole('button',{name:'Take photo'}).click();
+    const encoded=(await readFile((await(await event).path())!)).toString('base64');
+    return page.evaluate(async({encoded,points})=>{
+      const bitmap=await createImageBitmap(await(await fetch(`data:image/png;base64,${encoded}`)).blob());
+      const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
+      const context=canvas.getContext('2d')!;context.drawImage(bitmap,0,0);
+      const values=points.map(p=>[...context.getImageData(Math.floor((1-p.x)*canvas.width),Math.floor(p.y*canvas.height),1,1).data]);bitmap.close();return values;
+    },{encoded,points});
+  };
+  const colored=(pixel:number[])=>Math.max(...pixel.slice(0,3))-Math.min(...pixel.slice(0,3));
+  // Left index is below its thumb; right hand has the opposite orientation.
+  await setTips([{x:.2,y:.75},{x:.15,y:.2},{x:.85,y:.2},{x:.8,y:.75}]);
+  let pixels=await samplePhoto([{x:.5,y:.4},{x:.05,y:.05}]);
+  expect(colored(pixels[0])).toBeLessThan(5);expect(colored(pixels[1])).toBeGreaterThan(20);
+  // One vertical hand and one horizontal hand, with a concave corner.
+  await setTips([{x:.2,y:.7},{x:.2,y:.2},{x:.9,y:.45},{x:.55,y:.45}]);
+  pixels=await samplePhoto([{x:.4,y:.45}]);expect(colored(pixels[0])).toBeLessThan(5);
+  // A fourth tip lies inside the triangle formed by the other tips.
+  await setTips([{x:.15,y:.15},{x:.5,y:.4},{x:.85,y:.15},{x:.85,y:.85}]);
+  pixels=await samplePhoto([{x:.35,y:.25},{x:.7,y:.35},{x:.35,y:.55}]);
+  expect(colored(pixels[0])).toBeLessThan(5);expect(colored(pixels[1])).toBeLessThan(5);expect(colored(pixels[2])).toBeGreaterThan(20);
+  // The compatibility renderer must clip the same concave shape.
+  const canvasPixels=await page.evaluate(async()=>{
+    const url='/src/media/canvas-renderer.ts';const {CanvasRenderer}=await import(/* @vite-ignore */url);
+    const renderer=new CanvasRenderer();const host=document.createElement('div');
+    await renderer.init(document.querySelector<HTMLVideoElement>('.camera-source')!,host,640,true);renderer.setEffect('grayscale');
+    renderer.render({corners:[{x:.15,y:.15},{x:.85,y:.15},{x:.85,y:.85},{x:.5,y:.4}],visibility:1,phase:'active'},1,0,true,'window');
+    const canvas=renderer.canvas as HTMLCanvasElement,context=canvas.getContext('2d')!;
+    const samples=[{x:.35,y:.25},{x:.7,y:.35},{x:.35,y:.55}].map(p=>[...context.getImageData(Math.floor((1-p.x)*canvas.width),Math.floor(p.y*canvas.height),1,1).data]);
+    renderer.destroy();return samples;
+  });
+  expect(colored(canvasPixels[0])).toBeLessThan(5);expect(colored(canvasPixels[1])).toBeLessThan(5);expect(colored(canvasPixels[2])).toBeGreaterThan(20);
+  // Subpixel spacing and coincident tips must not turn tracking off.
+  await setTips([{x:.5,y:.5},{x:.5,y:.50001},{x:.50001,y:.5},{x:.50001,y:.50001}]);
+  await setTips([{x:.5,y:.5},{x:.5,y:.5},{x:.5,y:.5},{x:.5,y:.5}]);
+  expect(errors).toEqual([]);
 });

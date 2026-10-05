@@ -61,10 +61,10 @@ test('WebKit renders the window, exports a photo, and records a playable MP4', a
 test('WebKit loads the real MediaPipe module worker and model', async ({ page }) => {
   await page.goto('/'); await canvasCamera(page, false);
   await page.getByRole('button', { name: 'Open your camera', exact: true }).click();
-  await expect(page.getByText('Make two L-shaped hands', { exact: true })).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByText('Show both hands', { exact: true })).toBeVisible({ timeout: 40_000 });
   await expect(page.getByTestId('camera-canvas')).toBeVisible();
   await page.waitForTimeout(1000);
-  await expect(page.getByText('Make two L-shaped hands', { exact: true })).toBeVisible();
+  await expect(page.getByText('Show both hands', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close camera', exact: true }).click();
 });
 

@@ -1,4 +1,4 @@
-import { distance, isFrameHand, orderWindow, validWindow } from './geometry';
+import { distance, fingertipPoints, hasFingertips, orderCorners, validWindow } from './geometry';
 import type { Corners, Landmark, PortalState } from './types';
 
 export class OneEuroFilter {
@@ -32,20 +32,26 @@ export class GestureTracker {
   private newFilters() { return Array.from({ length: 8 }, () => new OneEuroFilter()); }
 
   update(hands: Landmark[][], timestamp: number, aspect = 1): void {
+    if (this.lastValid !== null && timestamp - this.lastValid > 220) this.reset();
     let pair: [Landmark[], Landmark[]] | null = null;
-    if (hands.length === 2 && hands.every(h => isFrameHand(h, aspect))) {
+    const anchor = (hand: Landmark[]) => {
+      const wrist = hand[0];
+      const point = wrist && Number.isFinite(wrist.x) && Number.isFinite(wrist.y) ? wrist : { x: (hand[4].x + hand[8].x) / 2, y: (hand[4].y + hand[8].y) / 2 };
+      return { x: point.x * aspect, y: point.y };
+    };
+    const matchCost = (a: Landmark[], b: Landmark[]) => distance(anchor(a), anchor(b)) +
+      [4, 8].reduce((sum, index) => sum + distance({x:a[index].x*aspect,y:a[index].y},{x:b[index].x*aspect,y:b[index].y}),0);
+    if (hands.length === 2 && hands.every(hasFingertips)) {
       if (this.previous) {
-        const direct = distance(hands[0][0], this.previous[0][0]) + distance(hands[1][0], this.previous[1][0]);
-        const reverse = distance(hands[1][0], this.previous[0][0]) + distance(hands[0][0], this.previous[1][0]);
+        const direct = matchCost(hands[0],this.previous[0]) + matchCost(hands[1],this.previous[1]);
+        const reverse = matchCost(hands[1],this.previous[0]) + matchCost(hands[0],this.previous[1]);
         pair = reverse < direct ? [hands[1], hands[0]] : [hands[0], hands[1]];
       } else {
-        pair = hands[0][0].x < hands[1][0].x ? [hands[0], hands[1]] : [hands[1], hands[0]];
+        pair = [hands[0], hands[1]];
       }
     }
-    const candidate = pair ? orderWindow(pair[0], pair[1]) : null;
-    // Crossing hands must not silently reorder a portal that was already acquired.
-    if (candidate && pair && pair[0][0].x < pair[1][0].x && validWindow(candidate)) {
-      if (this.lastValid !== null && timestamp - this.lastValid > 220) this.reset();
+    const candidate = pair ? fingertipPoints(pair[0], pair[1]) : null;
+    if (candidate && pair && validWindow(candidate)) {
       this.previous = pair;
       this.candidateSince ??= timestamp;
       this.lastValid = timestamp;
@@ -54,7 +60,9 @@ export class GestureTracker {
         x: this.filters[i * 2].filter(p.x, timestamp),
         y: this.filters[i * 2 + 1].filter(p.y, timestamp),
       })) as Corners;
-      this.corners = validWindow(smoothed) ? smoothed : candidate;
+      // Sorting smoothed tips avoids blending an index tip into a different finger
+      // when hands rotate, cross, or exchange their order in the detector result.
+      this.corners = orderCorners(smoothed);
     } else if (!this.activated) {
       this.candidateSince = null;
       this.previous = null;

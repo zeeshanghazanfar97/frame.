@@ -30,10 +30,17 @@ uniform float uVisibility;
 uniform float uStrength;
 uniform float uMirror;
 uniform float uFull;
-float edge(vec2 a, vec2 b, vec2 p) {
-  vec2 direction = (b-a)*uSize;
-  vec2 offset = (p-a)*uSize;
-  return (direction.x*offset.y-direction.y*offset.x)/max(length(direction),0.001);
+float segmentDistance(vec2 a, vec2 b, vec2 p) {
+  vec2 direction=(b-a)*uSize, offset=(p-a)*uSize;
+  float lengthSquared=dot(direction,direction);
+  float projection=lengthSquared>0.0 ? clamp(dot(offset,direction)/lengthSquared,0.0,1.0) : 0.0;
+  return length(offset-projection*direction);
+}
+bool rayCrosses(vec2 a, vec2 b, vec2 p) {
+  if((a.y>p.y)!=(b.y>p.y)) {
+    return p.x < a.x+(p.y-a.y)*(b.x-a.x)/(b.y-a.y);
+  }
+  return false;
 }
 void main() {
   vec2 uv = vec2(mix(vUV.x, 1.0-vUV.x, uMirror), vUV.y);
@@ -41,9 +48,13 @@ void main() {
   float mask = uFull;
   if(uFull < 0.5 && uVisibility > 0.0) {
     vec2 a=uTop.xy,b=uTop.zw,c=uBottom.xy,d=uBottom.zw;
-    float direction=sign((b.x-a.x)*(c.y-b.y)-(b.y-a.y)*(c.x-b.x));
-    float nearEdge=min(min(direction*edge(a,b,uv),direction*edge(b,c,uv)),min(direction*edge(c,d,uv),direction*edge(d,a,uv)));
-    mask=smoothstep(-0.75,0.75,nearEdge)*uVisibility;
+    bool inside=rayCrosses(a,b,uv)!=rayCrosses(b,c,uv);
+    inside=inside!=rayCrosses(c,d,uv);
+    inside=inside!=rayCrosses(d,a,uv);
+    float nearest=min(min(segmentDistance(a,b,uv),segmentDistance(b,c,uv)),min(segmentDistance(c,d,uv),segmentDistance(d,a,uv)));
+    float shortest=min(min(length((b-a)*uSize),length((c-b)*uSize)),min(length((d-c)*uSize),length((a-d)*uSize)));
+    float feather=min(0.75,shortest*0.2);
+    mask=inside ? (feather>0.0 ? smoothstep(0.0,feather,nearest) : 1.0)*uVisibility : 0.0;
   }
   float amount=mask*uStrength;
   finalColor=amount>0.0 ? mix(raw,texture(uFilteredTexture,uv),amount) : raw;

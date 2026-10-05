@@ -5,12 +5,12 @@ import { CaptureManager, downloadBlob, idleCapture, type SavedClip } from './med
 import { availableEffects, effects, getEffect, type EffectCategory } from './media/effects';
 
 function PoseDiagram() {
-  // A functional landmark diagram: index tips above, thumb tips facing inward.
-  return <svg className="pose-diagram" viewBox="0 0 320 150" role="img" aria-label="Two L-shaped hands: index fingers up, thumbs pointing toward each other">
-    <path className="pose-window" d="M74 25 246 33 225 100 95 91Z" />
-    <path className="pose-fingers" d="M50 130 61 103 66 79 68 28Q68 18 75 19Q82 20 81 30L79 80 100 88Q110 91 106 98Q104 104 94 102L73 96M270 130 259 107 254 86 252 35Q252 25 245 26Q238 27 239 37L241 87 220 95Q210 98 214 105Q216 111 226 109L247 103" />
-    <g className="pose-joints"><circle cx="75" cy="24" r="4"/><circle cx="245" cy="31" r="4"/><circle cx="103" cy="96" r="4"/><circle cx="217" cy="103" r="4"/></g>
-    <path className="pose-folded" d="m49 111 10-15m-14 7 10-16m-14 7 10-16m220 33-10-15m14 7-10-16m14 7-10-16" />
+  // One inverted hand illustrates that finger roles do not fix corner orientation.
+  return <svg className="pose-diagram" viewBox="0 0 320 150" role="img" aria-label="Thumb and index fingertips define a window, with one hand upside down">
+    <path className="pose-window" d="M103 54 245 31 217 103 75 126Z" />
+    <g transform="translate(0 150) scale(1 -1)"><path className="pose-fingers" d="M50 130 61 103 66 79 68 28Q68 18 75 19Q82 20 81 30L79 80 100 88Q110 91 106 98Q104 104 94 102L73 96" /></g>
+    <path className="pose-fingers" d="M270 130 259 107 254 86 252 35Q252 25 245 26Q238 27 239 37L241 87 220 95Q210 98 214 105Q216 111 226 109L247 103" />
+    <g className="pose-joints"><circle cx="75" cy="126" r="4"/><circle cx="245" cy="31" r="4"/><circle cx="103" cy="54" r="4"/><circle cx="217" cy="103" r="4"/></g>
   </svg>;
 }
 
@@ -222,7 +222,7 @@ export default function App() {
         </div>
 
         {running && devices.length > 1 && <div className="device-row"><label htmlFor="camera-device">Camera</label><select id="camera-device" value={device} disabled={loading || transitioning} onChange={event => void changeCamera({ deviceId: event.target.value, facingMode: facing })}>{devices.map((camera, index) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `Camera ${index + 1}`}</option>)}</select></div>}
-        <div className="pose-guide"><div className="guide-number">01</div><div><h2>{status.mode==='full'?'The whole view, transformed.':'Two hands. One little window.'}</h2><p>{status.mode==='full'?'Filters cover the entire video. Switch effects any time, or explore hands-free with auto-cycle.':'Point both index fingers up and your thumbs inward. Fold your other fingers, then move your hands to shape the effect.'}</p></div>{status.mode==='window'&&<div className="inline-pose"><PoseDiagram/></div>}</div>
+        <div className="pose-guide"><div className="guide-number">01</div><div><h2>{status.mode==='full'?'The whole view, transformed.':'Two hands. One little window.'}</h2><p>{status.mode==='full'?'Filters cover the entire video. Switch effects any time, or explore hands-free with auto-cycle.':'Keep both thumbs and index fingertips in view. Turn your hands any way you like, and bring them closer or farther apart.'}</p></div>{status.mode==='window'&&<div className="inline-pose"><PoseDiagram/></div>}</div>
       </section>
 
       <aside className="library" aria-label="Effect library">
@@ -241,7 +241,7 @@ export default function App() {
 
     <footer className="app-footer"><span>Nothing uploaded. Just you, your camera, and a little imagination.</span><span>FRAME / CAMERA EFFECTS</span></footer>
     {notice && <div className="toast" role="status"><Check size={17}/><span>{notice}</span><button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={16}/></button></div>}
-    {help && <div className="modal-backdrop" onClick={() => setHelp(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={event => event.stopPropagation()}><button className="modal-close" aria-label="Close instructions" autoFocus onClick={() => setHelp(false)}><X size={20}/></button><div className="eyebrow">FIND YOUR FRAME</div><h2 id="help-title">Your fingers make the window.</h2><PoseDiagram/><ol><li>Open your camera and choose an effect.</li><li>Make an L with each hand: index up, thumb inward, other fingers folded.</li><li>Hold both hands in view. Move them to resize and tilt your window.</li><li>Save a photo, or record a clip with a three-second countdown.</li></ol><p className="help-note">Good lighting and a little space around your hands help. Turn on auto-cycle to explore without lowering your hands.</p><button className="primary-button" onClick={() => setHelp(false)}>Got it</button></section></div>}
+    {help && <div className="modal-backdrop" onClick={() => setHelp(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={event => event.stopPropagation()}><button className="modal-close" aria-label="Close instructions" autoFocus onClick={() => setHelp(false)}><X size={20}/></button><div className="eyebrow">FIND YOUR FRAME</div><h2 id="help-title">Your fingers make the window.</h2><PoseDiagram/><ol><li>Open your camera and choose an effect.</li><li>Show both hands with your thumb and index fingertips visible. No particular pose is required.</li><li>Rotate either hand freely and move the fingertips to reshape your window.</li><li>Save a photo, or record a clip with a three-second countdown.</li></ol><p className="help-note">Good lighting and visible fingertips help tracking. Turn on auto-cycle to explore without lowering your hands.</p><button className="primary-button" onClick={() => setHelp(false)}>Got it</button></section></div>}
     {clip && <div className="modal-backdrop" onClick={dismissClip}><section className="modal clip-modal" role="dialog" aria-modal="true" aria-labelledby="clip-title" onClick={event => event.stopPropagation()}><button className="modal-close" autoFocus aria-label="Close video preview" onClick={dismissClip}><X size={20}/></button><div className="eyebrow">YOURS TO KEEP</div><h2 id="clip-title">A little moment, captured.</h2><video controls playsInline src={clip.url} aria-label="Recorded video preview"/><div className="clip-details"><span>{Math.round(clip.duration)} seconds</span><span>{clip.extension.toUpperCase()} · {(clip.blob.size / 1_000_000).toFixed(1)} MB</span></div><button className="primary-button" onClick={() => downloadBlob(clip.blob, `frame-${Date.now()}.${clip.extension}`)}><Download size={18}/>Download video</button><button className="text-button" onClick={dismissClip}>Keep creating</button></section></div>}
   </div>;
 }

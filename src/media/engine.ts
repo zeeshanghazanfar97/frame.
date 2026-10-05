@@ -111,7 +111,7 @@ export class CameraEngine {
       this.tracker.reset(); this.sampleAt = performance.now(); this.frames = 0;
       this.qualityIndex = 0; this.trackingHz = 20; this.lastInference = -Infinity; this.lastRender = -Infinity;
       this.lastVideoTime = -1; this.lastDecodedFrameAt = performance.now(); this.dirty = true;
-      this.publish({ state:'running',message:this.mode==='full'?'Full video':'Make two L-shaped hands',phase:'searching',quality:this.compositor.backend==='canvas'?640:1280,mode:this.mode,renderer:this.compositor.backend });
+      this.publish({ state:'running',message:this.mode==='full'?'Full video':'Show both hands',phase:'searching',quality:this.compositor.backend==='canvas'?640:1280,mode:this.mode,renderer:this.compositor.backend });
       this.startNeural();
       this.watchVideo(session);
       this.animation = requestAnimationFrame(now => this.render(now, session));
@@ -196,7 +196,7 @@ export class CameraEngine {
       catch { this.onInterrupt?.(); this.fail('The camera effect could not render. Restart your camera to try again.'); return; }
       this.renderTime+=performance.now()-started;
       this.dirty = false; this.lastRender = now; this.frames++;
-      const message = this.mode==='full'?'Full video':portal.phase === 'active' ? 'Window active' : portal.phase === 'candidate' ? 'Hold that pose…' : portal.phase === 'lost' ? 'Finding your fingertips…' : 'Make two L-shaped hands';
+      const message = this.mode==='full'?'Full video':portal.phase === 'active' ? 'Window active' : portal.phase === 'candidate' ? 'Hold that pose…' : portal.phase === 'lost' ? 'Finding your fingertips…' : 'Show both hands';
       if (portal.phase !== this.status.phase) this.publish({ phase: portal.phase, message });
       if (now - this.sampleAt >= 2000) {
         const fps = this.frames / ((now - this.sampleAt) / 1000);
@@ -234,7 +234,7 @@ export class CameraEngine {
     }else{
       this.publish({mode,phase:'searching',message:'Loading hand tracking…'});
       if(this.status.state==='running'){
-        try{await this.initWorker(this.session);this.publish({message:'Make two L-shaped hands'});}
+        try{await this.initWorker(this.session);this.publish({message:'Show both hands'});}
         catch(error){if(this.mode==='window'){await this.setMode('full');this.publish({message:error instanceof Error?error.message:'Hand tracking unavailable. Full video is available.'});}}
       }
     }
