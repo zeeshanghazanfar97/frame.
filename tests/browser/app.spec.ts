@@ -7,7 +7,9 @@ async function fixtureTracking(page: Page, microphoneDenied = false) {
     const nativeWorker = window.Worker;
     const nativeMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     const trackStore: MediaStreamTrack[] = [];
-    Object.assign(window, { fixtureTracks: trackStore, fixturePoseVisible: true, fixtureFrameCount: 0, fixtureWorkerFailures: false });
+    const unhandled: string[] = [];
+    window.addEventListener('unhandledrejection', event => unhandled.push(String(event.reason)));
+    Object.assign(window, { fixtureTracks: trackStore, fixturePoseVisible: true, fixtureFrameCount: 0, fixtureWorkerFailures: false, fixtureUnhandled: unhandled });
     navigator.mediaDevices.getUserMedia = async constraints => {
       if (microphoneDenied && constraints?.audio) throw new DOMException('Fixture denial', 'NotAllowedError');
       const stream = await nativeMedia(constraints);
@@ -219,4 +221,5 @@ test('tracking initialization failure releases the camera and offers retry', asy
   await page.evaluate(() => { (window as unknown as { fixtureWorkerFailures: boolean }).fixtureWorkerFailures = false; });
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await expect(page.getByText('Window active', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { fixtureUnhandled: string[] }).fixtureUnhandled)).toEqual([]);
 });

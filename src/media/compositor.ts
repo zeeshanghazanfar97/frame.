@@ -72,8 +72,11 @@ export class Compositor {
     await this.app.init({ preference: 'webgl', width: size.width, height: size.height, resolution: 1, antialias: false, backgroundAlpha: 1, autoStart: false, powerPreference: 'high-performance' });
     if (this.destroyed) { this.app.destroy(true); throw new Error('Camera startup was cancelled.'); }
     this.app.stop();
-    this.source = new VideoSource({ resource: video, autoPlay: false });
+    this.source = new VideoSource({ resource: video, autoPlay: false, autoLoad: false });
     this.source.autoUpdate = false;
+    // Await loading so cancellation cannot leave an unobserved preload promise.
+    await this.source.load();
+    if (this.destroyed) throw new Error('Camera startup was cancelled.');
     this.videoTexture = new Texture({ source: this.source });
     this.sourceSprite = new Sprite(this.videoTexture);
     this.sourceStage.addChild(this.sourceSprite);
@@ -166,7 +169,8 @@ export class Compositor {
     this.sourceSprite?.destroy(); this.mixSprite?.destroy(); this.display?.destroy();
     this.sourceStage.destroy(); this.mixStage.destroy();
     this.raw?.destroy(true); this.filtered?.destroy(true); this.combined?.destroy(true);
-    this.videoTexture?.destroy(true);
+    if (this.videoTexture) this.videoTexture.destroy(true);
+    else this.source?.destroy();
     if (this.app.renderer) this.app.destroy(true);
   }
 }
